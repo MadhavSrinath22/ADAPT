@@ -1,13 +1,127 @@
-# DEFER: Distributed Edge Inference for Deep Neural Networks
-Performing model inference across multiple edge devices
+ADAPT: Adaptive Deep-learning Architecture for Parallel and Tolerant Inference
+ADAPT is a fault-tolerant, adaptive distributed inference framework designed for running deep neural network (DNN) inference across heterogeneous and failure-prone edge devices. It rethinks pipeline-parallel inference by replacing rigid peer-to-peer chains (e.g., DEFER) with a centralized dispatcher, dynamic worker scheduling, and multi-layer fault tolerance.
 
-To use DEFER, run `node.py` on a compute node, and import the `DEFER` class into your main program on the dispatcher node.
+This project was developed as part of ECE 750 – Scalable Computer System Design and evaluated using ResNet-50 inference over mixed CPU/GPU workers.
 
-Alternatively, try the `test.py` program in the `test` folder.
+🚀 Key Features
+Centralized Dispatcher Architecture
 
-To benchmark DEFER against Single Device Inference, run `local_infer.py` and compare it to running `test.py`.
-This code is associated with the paper A. Parthasarathy and B. Krishnamachari, "DEFER: Distributed Edge Inference for Deep Neural Networks," published at Workshop on Machine Intelligence in Networked Data and Systems (MINDS), organized in conjunction with 15th International Conference on COMmunication Systems & NETworkS (COMSNETS), Bengaluru, India, 2022. This paper received the best paper award at the workshop. 
-An online preprint of the paper is available at: https://arxiv.org/abs/2201.06769 
+Eliminates brittle worker-to-worker pipelines
+Enables global visibility, scheduling, and recovery
+Dynamic, Resource-Aware Scheduling
 
+Workers selected based on real-time memory usage
+Lowest-load-first policy with cooldown
+Dual-Layer Fault Tolerance
 
-Abstract: Modern machine learning tools such as deep neural networks (DNNs) are playing a revolutionary role in many fields such as natural language processing, computer vision, and the internet of things. Once they are trained, deep learning models can be deployed on edge computers to perform classification and prediction on real-time data for these applications. Particularly for large models, the limited computational and memory resources on a single edge device can become the throughput bottleneck for an inference pipeline. To increase throughput and decrease per-device compute load, we present DEFER (Distributed Edge inFERence), a framework for distributed edge inference, which partitions deep neural networks into layers that can be spread across multiple compute nodes. The architecture consists of a single "dispatcher" node to distribute DNN partitions and inference data to respective compute nodes. The compute nodes are connected in a series pattern where each node's computed result is relayed to the subsequent node. The result is then returned to the Dispatcher. We quantify the throughput, energy consumption, network payload, and overhead for our framework under realistic network conditions using the CORE network emulator. We find that for the ResNet50 model, the inference throughput of DEFER with 8 compute nodes is 53% higher and per node energy consumption is 63% lower than single device inference. We further reduce network communication demands and energy consumption using the ZFP serialization and LZ4 compression algorithms. We have implemented DEFER in Python using the TensorFlow and Keras ML libraries, and have released DEFER as an open-source framework to benefit the research community.
+Soft failures: timeout-based task retries
+Hard failures: heartbeat-based detection via Etcd
+QoS-Based Reliability Scoring
+
+Penalizes unstable workers
+Circuit breaker for repeatedly failing nodes
+Elastic Worker Membership
+
+Workers can join/leave at runtime
+Stateless execution model
+Pipeline Parallelism
+
+ResNet-50 partitioned across workers
+Supports configurable pipeline concurrency
+Transparent CPU/GPU Execution
+
+GPU used when available, CPU otherwise
+🧠 Motivation
+Existing distributed edge inference systems such as DEFER assume:
+
+Stable workers
+Fixed pipelines
+No runtime failures
+No system observability
+These assumptions break down in real-world edge environments where:
+
+Nodes crash or disconnect
+Resources fluctuate
+Hardware is heterogeneous
+ADAPT addresses these challenges by prioritizing robustness, adaptability, and observability, even at the cost of slight performance overhead.
+
+🏗️ System Architecture
+        +-------------------+
+        |     Dispatcher    |
+        |-------------------|
+        | Scheduling        |
+        | Fault Handling    |
+        | QoS Scoring       |
+        +---------+---------+
+                  |
+      ---------------------------------
+      |        |        |        |     |
+ +---------+ +---------+ +---------+  |
+ | Worker  | | Worker  | | Worker  | ...
+ | (CPU)   | | (GPU)   | | (CPU)   |
+ +---------+ +---------+ +---------+
+                  |
+              +--------+
+              |  Etcd  |
+              |--------|
+              | State  |
+              | Health |
+              +--------+
+Dispatcher: Assigns tasks, handles retries, manages QoS
+Workers: Stateless executors of model partitions
+Etcd: Global state store (heartbeats, memory usage, liveness)
+⚙️ Methodology Overview
+Model Partitioning
+ResNet-50 split into sequential partitions
+Each partition executed independently
+Scheduling Policy
+Select worker with lowest memory usage + penalty score
+QoS Penalty Rules
+Task failure: S_penalty += 50
+Task success: S_penalty *= 0.8
+Circuit breaker at S_penalty > 200
+Fault Handling
+Soft Failures: Timeout → retry on new worker
+Hard Failures: Missed Etcd heartbeat → worker removed
+📊 Experimental Evaluation
+Setup
+Model: ResNet-50
+Dataset: Food-101 (batch size = 1)
+Workers: 1, 4, and 8
+Mixed CPU/GPU environment
+Results Summary
+Metric	Observation
+Best Pipeline Concurrency	4
+Latency Reduction	~75% (vs concurrency=1)
+Worker Utilization	>80% balanced
+Fault Recovery	Automatic, no system halt
+ADAPT maintains stable throughput even under worker churn, unlike DEFER where a single failure collapses the pipeline.
+
+⚖️ ADAPT vs DEFER
+Aspect	DEFER	ADAPT
+Topology	Fixed pipeline	Central dispatcher
+Fault Tolerance	❌ None	✅ Dual-layer
+Worker Churn	❌ Unsupported	✅ Supported
+Scheduling	Static	Dynamic, load-aware
+Observability	❌ None	✅ Etcd-backed
+Performance	Higher (ideal case)	Slightly lower but robust
+⚠️ Limitations
+Dispatcher is a potential bottleneck
+Stateless workers increase network I/O
+Memory-only scheduling ignores CPU thermal throttling
+🔮 Future Work
+Multi-dispatcher architecture
+NPU / accelerator-aware scheduling
+Model parameter caching
+Partition-level replication
+📚 References
+Parthasarathy et al., DEFER: Distributed Edge Inference, 2022
+Zeng et al., CoEdge, IEEE/ACM ToN, 2020
+👥 Authors
+Xuanzheng Zhang
+Bryan Ronnie Jayasingh
+Madhav Srinath Thanigaivel
+Barun Gnanasekaran
+Karthi Elayaperumal Sampath
+📄 License
+This project is released for academic and research purposes.
