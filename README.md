@@ -1,193 +1,60 @@
-# ADAPT: Adaptive Deep-learning Architecture for Parallel and Tolerant Inference
+# ADAPT Distributed Inference
 
-ADAPT is a **fault-tolerant, adaptive distributed inference framework** designed for running deep neural network (DNN) inference across **heterogeneous and failure-prone edge devices**. It rethinks pipeline-parallel inference by replacing rigid peer-to-peer chains (e.g., DEFER) with a **centralized dispatcher**, **dynamic worker scheduling**, and **multi-layer fault tolerance**.
-
-This project was developed as part of **ECE 750 – Scalable Computer System Design** and evaluated using **ResNet-50 inference** over mixed CPU/GPU workers.
+ADAPT splits a TensorFlow model across many machines. A dispatcher sends each worker the correct model slice, forwards data through the chain, and collects the final result. Use this repo when you want ResNet-50 to keep running even if workers come and go.
 
 ---
 
-## 🚀 Key Features
+## What Is Inside
 
-* **Centralized Dispatcher Architecture**
-
-  * Eliminates brittle worker-to-worker pipelines
-  * Enables global visibility, scheduling, and recovery
-
-* **Dynamic, Resource-Aware Scheduling**
-
-  * Workers selected based on real-time memory usage
-  * Lowest-load-first policy with cooldown
-
-* **Dual-Layer Fault Tolerance**
-
-  * *Soft failures*: timeout-based task retries
-  * *Hard failures*: heartbeat-based detection via Etcd
-
-* **QoS-Based Reliability Scoring**
-
-  * Penalizes unstable workers
-  * Circuit breaker for repeatedly failing nodes
-
-* **Elastic Worker Membership**
-
-  * Workers can join/leave at runtime
-  * Stateless execution model
-
-* **Pipeline Parallelism**
-
-  * ResNet-50 partitioned across workers
-  * Supports configurable pipeline concurrency
-
-* **Transparent CPU/GPU Execution**
-
-  * GPU used when available, CPU otherwise
+- [src/dispatcher.py](src/dispatcher.py) holds the dispatcher (`DEFER` class).
+- [src/node.py](src/node.py) starts a worker that receives weights, runs inference, and forwards results.
+- [src/node_state.py](src/node_state.py) defines socket helpers and the etcd-backed worker state.
+- [test/test.py](test/test.py) is the sample driver that feeds images into the system.
 
 ---
 
-## 🧠 Motivation
+## Requirements
 
-Existing distributed edge inference systems such as **DEFER** assume:
+- Python 3.10 or newer.
+- TensorFlow 2.15, numpy, psutil, pynvml, etcd3, lz4, zfpy, pillow.
+- An etcd v3 server reachable from dispatcher and workers (script: `src/start_etcd.sh`).
+- Ports 6000-6003 open between dispatcher and every worker.
 
-* Stable workers
-* Fixed pipelines
-* No runtime failures
-* No system observability
+Install packages after cloning:
 
-These assumptions break down in real-world edge environments where:
-
-* Nodes crash or disconnect
-* Resources fluctuate
-* Hardware is heterogeneous
-
-**ADAPT** addresses these challenges by prioritizing **robustness, adaptability, and observability**, even at the cost of slight performance overhead.
-
----
-
-## 🏗️ System Architecture
-
-```
-        +-------------------+
-        |     Dispatcher    |
-        |-------------------|
-        | Scheduling        |
-        | Fault Handling    |
-        | QoS Scoring       |
-        +---------+---------+
-                  |
-      ---------------------------------
-      |        |        |        |     |
- +---------+ +---------+ +---------+  |
- | Worker  | | Worker  | | Worker  | ...
- | (CPU)   | | (GPU)   | | (CPU)   |
- +---------+ +---------+ +---------+
-                  |
-              +--------+
-              |  Etcd  |
-              |--------|
-              | State  |
-              | Health |
-              +--------+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Use .\.venv\Scripts\Activate.ps1 on Windows
+python -m pip install --upgrade pip
+python -m pip install tensorflow==2.15.0 numpy psutil pynvml etcd3 lz4 zfpy pillow
 ```
 
-* **Dispatcher**: Assigns tasks, handles retries, manages QoS
-* **Workers**: Stateless executors of model partitions
-* **Etcd**: Global state store (heartbeats, memory usage, liveness)
+Place a test image at `resource/test.jpg` before running the demo.
 
 ---
 
-## ⚙️ Methodology Overview
+## How to Run
 
-### Model Partitioning
+1. **Start etcd** on the dispatcher machine.
+   - Linux/WSL: `bash src/start_etcd.sh`
+   - Windows: download etcd zip, run `etcd.exe --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://<dispatcher-ip>:2379`
 
-* ResNet-50 split into sequential partitions
-* Each partition executed independently
+2. **Start workers** on each compute node.
+   - Edit [src/node.py](src/node.py) if you need to change dispatcher IP or chunk size.
+   - Run `python -m src.node` (keep one process per worker machine or port range).
 
-### Scheduling Policy
+3. **Configure the dispatcher** in [test/test.py](test/test.py).
+   - Set `computeNodes` to the worker IP list.
+   - Populate `part_at` with layer names if you want more than one partition (leave empty for single chunk).
 
-* Select worker with **lowest memory usage + penalty score**
+4. **Launch the pipeline** from the repository root:
 
-### QoS Penalty Rules
+   ```bash
+   python test/test.py
+   ```
 
-* Task failure: `S_penalty += 50`
-* Task success: `S_penalty *= 0.8`
-* Circuit breaker at `S_penalty > 200`
+   The script loads ResNet-50, partitions it, sends weights to workers, and prints throughput once `task_size` batches finish.
 
-### Fault Handling
-
-* **Soft Failures**: Timeout → retry on new worker
-* **Hard Failures**: Missed Etcd heartbeat → worker removed
-
----
-
-## 📊 Experimental Evaluation
-
-### Setup
-
-* Model: **ResNet-50**
-* Dataset: **Food-101** (batch size = 1)
-* Workers: 1, 4, and 8
-* Mixed CPU/GPU environment
-
-### Results Summary
-
-| Metric                    | Observation               |
-| ------------------------- | ------------------------- |
-| Best Pipeline Concurrency | 4                         |
-| Latency Reduction         | ~75% (vs concurrency=1)   |
-| Worker Utilization        | >80% balanced             |
-| Fault Recovery            | Automatic, no system halt |
-
-ADAPT maintains stable throughput even under worker churn, unlike DEFER where a single failure collapses the pipeline.
+5. **Send your own inputs** by writing tensors into the `input_q` queue inside `test/test.py` instead of the sample loop.
 
 ---
-
-## ⚖️ ADAPT vs DEFER
-
-| Aspect          | DEFER               | ADAPT                     |
-| --------------- | ------------------- | ------------------------- |
-| Topology        | Fixed pipeline      | Central dispatcher        |
-| Fault Tolerance | ❌ None              | ✅ Dual-layer              |
-| Worker Churn    | ❌ Unsupported       | ✅ Supported               |
-| Scheduling      | Static              | Dynamic, load-aware       |
-| Observability   | ❌ None              | ✅ Etcd-backed             |
-| Performance     | Higher (ideal case) | Slightly lower but robust |
-
----
-
-## ⚠️ Limitations
-
-* Dispatcher is a potential bottleneck
-* Stateless workers increase network I/O
-* Memory-only scheduling ignores CPU thermal throttling
-
----
-
-## 🔮 Future Work
-
-* Multi-dispatcher architecture
-* NPU / accelerator-aware scheduling
-* Model parameter caching
-* Partition-level replication
-
----
-
-## 📚 References
-
-* Parthasarathy et al., *DEFER: Distributed Edge Inference*, 2022
-* Zeng et al., *CoEdge*, IEEE/ACM ToN, 2020
-
----
-
-## 👥 Authors
-
-* Xuanzheng Zhang
-* Bryan Ronnie Jayasingh
-* Madhav Srinath Thanigaivel
-* Barun Gnanasekaran
-* Karthi Elayaperumal Sampath
-
----
-
-## 📄 License
-
-This project is released for **academic and research purposes**.
